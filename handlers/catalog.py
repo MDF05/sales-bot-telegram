@@ -76,7 +76,7 @@ async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = messages.category_message(cat_name)
     kb   = keyboards.products_keyboard(products, category_id)
 
-    if category and category.get("banner_file_id"):
+    if category and category["banner_file_id"]:
         # Tampilkan sebagai gambar
         file_id = category["banner_file_id"]
         if query.message.photo:
