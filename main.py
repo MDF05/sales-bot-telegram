@@ -52,6 +52,7 @@ from handlers.admin import (
     createvoucher_command,
     vouchers_command,
     delvoucher_command,
+    setbanner_command,
     maintenance_command,
 )
 
@@ -128,6 +129,7 @@ def main():
     app.add_handler(CommandHandler("createvoucher", createvoucher_command))
     app.add_handler(CommandHandler("vouchers",      vouchers_command))
     app.add_handler(CommandHandler("delvoucher",    delvoucher_command))
+    app.add_handler(CommandHandler("setbanner",     setbanner_command))
 
     # ── ConversationHandler (prioritas tinggi) ────────────────────
     app.add_handler(buy_conv)

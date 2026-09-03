@@ -2,17 +2,18 @@
 handlers/admin.py — Panel Admin
 =================================
 Commands:
-  /admin        — Tampilkan statistik + menu admin
-  /addstock     — Tambah stok item ke produk
-  /broadcast    — Kirim pesan ke semua customer
+  /admin         — Tampilkan statistik + menu admin
+  /addstock      — Tambah stok item ke produk
+  /broadcast     — Kirim pesan ke semua customer
   /createvoucher — Buat voucher diskon baru
-  /vouchers     — Tampilkan semua voucher aktif
+  /vouchers      — Tampilkan semua voucher aktif
+  /setbanner     — Set banner image untuk kategori (reply ke foto)
 
 Callbacks:
-  admin_*           — Navigasi panel admin
-  admin_voucher*    — Kelola voucher
-  approve_{id}      — Approve pesanan
-  reject_{id}       — Tampilkan pilihan alasan reject
+  admin_*            — Navigasi panel admin
+  admin_voucher*     — Kelola voucher
+  approve_{id}       — Approve pesanan
+  reject_{id}        — Tampilkan pilihan alasan reject
   reject_do_{id}_{n} — Eksekusi reject dengan alasan
 """
 import logging
@@ -316,11 +317,14 @@ async def add_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += [
             "",
             "<b>Cara tambah stok:</b>",
-            "<code>/addstock [ID] [isi_item]</code>",
+            "<code>/addstock [ID] [kode_voucher_lengkap]</code>",
             "",
-            "Contoh:",
-            "<code>/addstock 1 MLBB-XXXX-XXXX-XXXX</code>",
-            "<code>/addstock 7 FF-CODE-12345</code>",
+            "<b>Contoh Roblox Gift Card:</b>",
+            "<code>/addstock 1 FZQ3W-CUQFB-YGEKN-12345</code>",
+            "<code>/addstock 2 ABCDE-12345-FGHIJ-67890</code>",
+            "",
+            "<i>⚠️ Satu perintah = satu kode voucher.</i>",
+            "<i>Ulangi perintah untuk setiap kode yang berbeda.</i>",
         ]
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
         return
@@ -330,7 +334,7 @@ async def add_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         item_content = " ".join(args[1:])
     except ValueError:
         await update.message.reply_text(
-            "❌ Format salah.\nContoh: <code>/addstock 1 MLBB-XXXX-XXXX</code>",
+            "❌ Format salah.\nContoh: <code>/addstock 1 FZQ3W-CUQFB-YGEKN</code>",
             parse_mode="HTML",
         )
         return
@@ -348,10 +352,11 @@ async def add_stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_count = db.get_stock_count(product_id)
 
     await update.message.reply_text(
-        f"✅ Stok berhasil ditambahkan!\n\n"
+        f"✅ <b>Stok berhasil ditambahkan!</b>\n\n"
         f"📦 Produk : <b>{product['name']}</b>\n"
-        f"🔑 Item   : <code>{item_content}</code>\n"
-        f"📊 Total stok sekarang: <b>{new_count}</b>",
+        f"🔑 Kode   : <code>{item_content}</code>\n"
+        f"📊 Total stok sekarang: <b>{new_count}</b>\n\n"
+        f"<i>Ulangi /addstock untuk menambah kode lainnya.</i>",
         parse_mode="HTML",
     )
 
@@ -599,6 +604,201 @@ async def delvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """/delvoucher KODE — Nonaktifkan voucher."""
     args = context.args or []
     if not args:
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /login [password]
+    Login sebagai admin dari device baru.
+    """
+    user_id = update.effective_user.id
+    if user_id in config.ADMIN_IDS:
+        await update.message.reply_text("✅ Anda sudah login sebagai Admin.")
+        return
+
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("❌ Gunakan format: /login <password>")
+        return
+
+    password = args[0]
+    if password == config.ADMIN_PASSWORD:
+        config.ADMIN_IDS.append(user_id)
+        
+        # Simpan ke .env
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+        if os.path.exists(env_path):
+            new_ids = ",".join(map(str, config.ADMIN_IDS))
+            set_key(env_path, "ADMIN_IDS", new_ids)
+
+        await update.message.reply_text(
+            "✅ Login berhasil! Anda sekarang adalah Admin.\n"
+            "Ketik /help untuk melihat menu Admin."
+        )
+    else:
+        await update.message.reply_text("❌ Password salah.")
+
+
+# ── Maintenance Mode ────────────────────────────────────────────────
+
+@admin_only
+async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /maintenance on  — Aktifkan mode pemeliharaan
+    /maintenance off — Nonaktifkan mode pemeliharaan
+    """
+    args = context.args or []
+    if not args or args[0].lower() not in ("on", "off"):
+        status = "🔴 AKTIF" if config.MAINTENANCE_MODE else "🟢 NONAKTIF"
+        await update.message.reply_text(
+            f"🔧 <b>Maintenance Mode</b>\n\n"
+            f"Status sekarang: <b>{status}</b>\n\n"
+            "Gunakan:\n"
+            "<code>/maintenance on</code>  — Aktifkan\n"
+            "<code>/maintenance off</code> — Nonaktifkan",
+            parse_mode="HTML",
+        )
+        return
+
+    mode = args[0].lower() == "on"
+    config.MAINTENANCE_MODE = mode
+
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if os.path.exists(env_path):
+        set_key(env_path, "MAINTENANCE_MODE", "true" if mode else "false")
+
+    if mode:
+        await update.message.reply_text(
+            "🔧 <b>Maintenance Mode AKTIF</b>\n\n"
+            "Semua pesan dari buyer sekarang akan mendapat balasan pesan pemeliharaan.\n"
+            "Gunakan <code>/maintenance off</code> untuk kembali normal.",
+            parse_mode="HTML",
+        )
+    else:
+        await update.message.reply_text(
+            "✅ <b>Maintenance Mode NONAKTIF</b>\n\nBot kembali beroperasi normal!",
+            parse_mode="HTML",
+        )
+
+
+# ── Voucher ────────────────────────────────────────────────────────
+
+@admin_only
+async def admin_voucher_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tampilkan menu kelola voucher."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data  # admin_voucher, admin_voucher_list, admin_voucher_deactivate
+
+    if action == "admin_voucher_list" or action == "admin_voucher":
+        vouchers = db.get_active_vouchers()
+        await query.edit_message_text(
+            text=messages.voucher_list_message(vouchers),
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+    elif action == "admin_voucher_create":
+        await query.edit_message_text(
+            "🎫 <b>Buat Voucher Baru</b>\n\n"
+            "Gunakan command berikut di chat:\n\n"
+            "<code>/createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU</code>\n\n"
+            "<b>Contoh:</b>\n"
+            "<code>/createvoucher HEMAT10 persen 10 50 7</code>\n"
+            "  → Diskon 10%, maks 50 pemakai, berlaku 7 hari\n\n"
+            "<code>/createvoucher FLASH5K nominal 5000 10 1</code>\n"
+            "  → Potongan Rp 5.000, maks 10 pemakai, berlaku 1 hari",
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+    elif action == "admin_voucher_deactivate":
+        await query.edit_message_text(
+            "🗑️ <b>Nonaktifkan Voucher</b>\n\n"
+            "Gunakan command:\n"
+            "<code>/delvoucher KODE</code>\n\n"
+            "<i>Contoh: /delvoucher HEMAT10</i>",
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+
+@admin_only
+async def createvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU
+    Tipe: persen | nominal
+    Contoh: /createvoucher HEMAT10 persen 10 50 7
+    """
+    args = context.args or []
+    if len(args) < 5:
+        await update.message.reply_text(
+            "❌ Format salah!\n\n"
+            "Gunakan:\n"
+            "<code>/createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU</code>\n\n"
+            "<b>Contoh:</b>\n"
+            "<code>/createvoucher HEMAT10 persen 10 50 7</code>\n"
+            "<code>/createvoucher FLASH5K nominal 5000 10 1</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    code, tipe, nilai, max_uses, hari = args[0], args[1].lower(), args[2], args[3], args[4]
+
+    if tipe not in ("persen", "nominal"):
+        await update.message.reply_text("❌ Tipe harus \"persen\" atau \"nominal\".")
+        return
+
+    try:
+        nilai    = int(nilai)
+        max_uses = int(max_uses)
+        hari     = int(hari)
+    except ValueError:
+        await update.message.reply_text("❌ Nilai, max_pemakai, dan hari_berlaku harus berupa angka.")
+        return
+
+    if tipe == "persen" and not (1 <= nilai <= 100):
+        await update.message.reply_text("❌ Diskon persen harus antara 1–100.")
+        return
+
+    result = db.create_voucher(
+        code=code,
+        discount_type=tipe,
+        discount_value=nilai,
+        max_uses=max_uses,
+        days_valid=hari,
+        created_by=update.effective_user.id,
+    )
+
+    if not result:
+        await update.message.reply_text(f"❌ Kode voucher <code>{code.upper()}</code> sudah ada!", parse_mode="HTML")
+        return
+
+    tipe_label = f"{nilai}%" if tipe == "persen" else f"Rp {nilai:,}"
+    await update.message.reply_text(
+        f"✅ <b>Voucher berhasil dibuat!</b>\n\n"
+        f"🎫 Kode   : <code>{result['code']}</code>\n"
+        f"💸 Diskon  : {tipe_label}\n"
+        f"👥 Maks    : {max_uses} pemakai\n"
+        f"📅 Berlaku : s/d {str(result['expires_at'])[:10]}",
+        parse_mode="HTML",
+    )
+
+
+@admin_only
+async def vouchers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/vouchers — Tampilkan semua voucher aktif."""
+    vouchers = db.get_active_vouchers()
+    await update.message.reply_text(
+        text=messages.voucher_list_message(vouchers),
+        parse_mode="HTML",
+        reply_markup=keyboards.admin_voucher_menu_keyboard(),
+    )
+
+
+@admin_only
+async def delvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/delvoucher KODE — Nonaktifkan voucher."""
+    args = context.args or []
+    if not args:
         await update.message.reply_text("❌ Gunakan: /delvoucher KODE")
         return
 
@@ -606,5 +806,46 @@ async def delvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.deactivate_voucher(code)
     await update.message.reply_text(
         f"✅ Voucher <code>{code}</code> berhasil dinonaktifkan.",
+        parse_mode="HTML",
+    )
+
+
+# ── Catalog Banner ────────────────────────────────────────────────
+
+@admin_only
+async def setbanner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /setbanner [ID_Kategori] (sambil mereply ke foto)
+    Atur gambar banner untuk kategori.
+    """
+    msg = update.message
+    if not msg.reply_to_message or not msg.reply_to_message.photo:
+        await msg.reply_text("❌ Harap <b>reply (balas)</b> sebuah foto dengan command ini.", parse_mode="HTML")
+        return
+
+    args = context.args or []
+    if not args:
+        await msg.reply_text("❌ Gunakan format: <code>/setbanner [ID_Kategori]</code>", parse_mode="HTML")
+        return
+
+    try:
+        cat_id = int(args[0])
+    except ValueError:
+        await msg.reply_text("❌ ID Kategori harus angka.")
+        return
+
+    category = db.get_category(cat_id)
+    if not category:
+        await msg.reply_text(f"❌ Kategori dengan ID {cat_id} tidak ditemukan.")
+        return
+
+    # Ambil resolusi terbesar dari foto yang dikirim
+    file_id = msg.reply_to_message.photo[-1].file_id
+    db.set_category_banner(cat_id, file_id)
+
+    await msg.reply_text(
+        f"✅ <b>Banner berhasil dipasang!</b>\n\n"
+        f"Kategori: {category['emoji']} <b>{category['name']}</b>\n"
+        f"Cek di menu katalog sekarang.",
         parse_mode="HTML",
     )
