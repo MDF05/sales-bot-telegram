@@ -82,5 +82,41 @@ Pastikan Telegram User ID kamu tercantum dalam `ADMIN_IDS` di file `.env`.
 - `/admin` — Membuka panel kontrol.
 - `/broadcast <pesan>` — Mengirim pesan langsung ke semua pembeli.
 
-## 🔄 Rencana Upgrade Kedepan
-Kode dan skema database sudah dirancang agar siap mendukung implementasi **Payment Gateway Otomatis** (seperti Tripay). Kolom-kolom kredensial Tripay sudah disiapkan di file `.env.example`. Modifikasi kelak hanya akan mengubah sebagian kecil alur fungsi di `order.py` menjadi sistem pemeriksa pembayaran via *Webhook* atau *Polling API*.
+## 🚀 Next Implementation (Roadmap)
+
+Sistem telah dirancang agar mudah diskalakan. Berikut adalah prioritas pengembangan fitur selanjutnya:
+
+### 1. Payment Gateway Otomatis 💸
+Sistem verifikasi manual (menunggu admin klik "Approve") seringkali memperlambat proses transaksi, terutama di luar jam operasional.
+- **Rencana:** Integrasi dengan API Tripay, Moota, atau Paydisini.
+- **Flow:** User checkout → Bot memberikan QRIS/Virtual Account dinamis dari Payment Gateway → Saat user membayar, sistem Payment Gateway akan mengirim sinyal (*Webhook*) ke bot → Bot otomatis merubah status menjadi *Approved* dan mengirim item ke pembeli tanpa campur tangan admin sama sekali (100% otomatis 24/7).
+
+### 2. Fitur Broadcast & Promo 📢
+- **Rencana:** Menu khusus di panel admin Telegram untuk mengirim pesan massal.
+- **Fungsi:** Mengirimkan info produk baru, diskon, atau kode voucher ke semua user yang pernah menekan `/start` di bot. Sangat krusial untuk mendatangkan pelanggan kembali (*retention*).
+
+### 3. Manajemen Stok Massal (CSV/Excel) 📦
+- **Rencana:** Kemampuan untuk *upload* banyak kode item sekaligus tanpa harus mengetik `/addstock` satu per satu.
+- **Fungsi:** Admin cukup mengunggah file `.csv` ke bot Telegram, lalu bot akan membacanya dan memasukkan ratusan stok sekaligus ke database SQLite secara otomatis.
+
+### 4. Tampilan Web (Admin Dashboard & Etalase) 🌐
+- **Rencana:** Pembuatan aplikasi Web menggunakan framework modern (misal: Next.js atau React).
+- **Fungsi Admin:** Dashboard visual yang indah dengan grafik penjualan (*charts*), manajemen kategori, manajemen voucher, dan pemantauan stok yang lebih rapi ketimbang dari obrolan Telegram.
+- **Fungsi Pembeli:** Katalog produk (*etalase*) versi website, dimana pembeli bisa melihat-lihat produk layaknya di *e-commerce*, lalu saat menekan tombol "Beli", mereka akan diarahkan (*deep link*) ke bot Telegram untuk transaksi.
+
+### 5. Auto Backup & Restore 💾
+Untuk menjaga keamanan data transaksi dan sisa stok, kita memerlukan skrip pencadangan otomatis (Auto Backup).
+
+**Gambaran Flow Backup Otomatis:**
+1. Di server, kita memasang sebuah *Cron Job* (penjadwal tugas) yang berjalan setiap 12 atau 24 jam sekali.
+2. Saat jadwalnya tiba, *Cron Job* menjalankan script Python/Bash yang akan men-*zip* file `data/sales.db` (database SQLite).
+3. Script kemudian memanggil API Telegram untuk mengirim file zip tersebut secara otomatis ke obrolan pribadi Anda (atau grup khusus Admin) sebagai dokumen.
+4. Hasilnya: Setiap hari Anda akan menerima pesan masuk dari bot berupa file backup database terbaru.
+
+**Gambaran Flow Restorasi (Restore):**
+Jika server mengalami kerusakan parah atau Anda memindahkan bot ke VPS/Server baru:
+1. Anda cukup mengunduh (download) file backup `.zip` terbaru dari obrolan Telegram Anda.
+2. Ekstrak file tersebut, Anda akan mendapatkan `sales.db`.
+3. Pindahkan file tersebut ke folder `data/` di dalam server baru Anda.
+4. Jalankan bot (`sudo systemctl restart sales-bot`).
+5. Selesai! Seluruh data pesanan, pelanggan, sisa stok, dan saldo akan kembali persis seperti semula.
