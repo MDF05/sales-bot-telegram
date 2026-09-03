@@ -226,7 +226,7 @@ def my_orders_message(orders: List) -> str:
 
 def admin_new_order_message(order, product, user) -> str:
     final = order["final_price"] if order["final_price"] else product["price"]
-    voucher_line = f"🏷️ Voucher  : <code>{order['voucher_code']}</code>\n" if order.get("voucher_code") else ""
+    voucher_line = f"🏷️ Voucher  : <code>{order['voucher_code']}</code>\n" if order["voucher_code"] else ""
     return (
         "🔔 <b>PESANAN BARU!</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
