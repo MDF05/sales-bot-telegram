@@ -1,4 +1,4 @@
-﻿"""
+"""
 handlers/admin.py — Panel Admin
 =================================
 Commands:
@@ -620,12 +620,23 @@ async def delvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 @admin_only
 async def setbanner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    /setbanner [ID_Kategori] (sambil mereply ke foto)
+    /setbanner [ID_Kategori] (dikirim sebagai caption foto, ATAU mereply ke foto)
     Atur gambar banner untuk kategori.
     """
     msg = update.message
-    if not msg.reply_to_message or not msg.reply_to_message.photo:
-        await msg.reply_text("❌ Harap <b>reply (balas)</b> sebuah foto dengan command ini.", parse_mode="HTML")
+    file_id = None
+
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+    elif msg.reply_to_message and msg.reply_to_message.photo:
+        file_id = msg.reply_to_message.photo[-1].file_id
+
+    if not file_id:
+        await msg.reply_text(
+            "❌ Harap <b>kirim foto dengan caption</b> command ini, "
+            "ATAU <b>reply (balas)</b> ke sebuah pesan foto.", 
+            parse_mode="HTML"
+        )
         return
 
     args = context.args or []
@@ -644,8 +655,6 @@ async def setbanner_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(f"❌ Kategori dengan ID {cat_id} tidak ditemukan.")
         return
 
-    # Ambil resolusi terbesar dari foto yang dikirim
-    file_id = msg.reply_to_message.photo[-1].file_id
     db.set_category_banner(cat_id, file_id)
 
     await msg.reply_text(
