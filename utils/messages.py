@@ -171,10 +171,19 @@ def proof_received_message(order_code: str) -> str:
 
 def order_approved_buyer_message(result: dict, product) -> str:
     voucher_line = ""
-    if result.get("voucher_code"):
+    if result["voucher_code"]:
         voucher_line = f"🏷️ Voucher : <code>{result['voucher_code']}</code>\n"
 
-    final = result.get("final_price") or product["price"]
+    final = result["final_price"] or product["price"]
+
+    # Strip prefix sebelum "-" pertama (misal "Roblox-FZQ3W..." -> "FZQ3W...")
+    raw_code = result["item_content"]
+    if "-" in raw_code:
+        first_part = raw_code.split("-")[0]
+        # Hapus prefix jika bukan angka (angka = bagian kode asli)
+        if not first_part.isdigit():
+            raw_code = raw_code[len(first_part) + 1:]
+
     return (
         "🎉 <b>Pembayaran Dikonfirmasi!</b>\n\n"
         f"🔖 Kode   : <code>{result['order_code']}</code>\n"
@@ -182,9 +191,15 @@ def order_approved_buyer_message(result: dict, product) -> str:
         f"{voucher_line}"
         f"💰 Bayar  : <b>Rp {final:,}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━\n"
-        "🔑 <b>Item kamu:</b>\n\n"
-        f"<code>{result['item_content']}</code>\n\n"
-        "━━━━━━━━━━━━━━━━━━━\n\n"
+        "🔑 <b>Kode Voucher Gift Card kamu:</b>\n\n"
+        f"<code>{raw_code}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "📱 <b>Cara Redeem Roblox Gift Card:</b>\n"
+        "1️⃣ Buka Roblox di HP atau PC\n"
+        "2️⃣ Kunjungi <a href='https://www.roblox.com/redeem'>roblox.com/redeem</a>\n"
+        "3️⃣ Login ke akun Roblox kamu\n"
+        "4️⃣ Ketik kode di atas › klik <b>Redeem</b>\n"
+        "5️⃣ Robux langsung masuk ke akun kamu! 🚀\n\n"
         f"Terima kasih sudah berbelanja di <b>{STORE_NAME}</b>! 🙏\n"
         "Jangan lupa rekomendasikan ke teman ya! ⭐"
     )
