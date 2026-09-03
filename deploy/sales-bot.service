@@ -1,0 +1,21 @@
+[Unit]
+Description=MDFStore Sales Bot — Telegram
+Documentation=https://github.com/python-telegram-bot/python-telegram-bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/sales_bot
+ExecStart=/home/ubuntu/sales_bot/venv/bin/python main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Beri waktu 30 detik untuk graceful shutdown sebelum SIGKILL
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
