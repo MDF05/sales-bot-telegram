@@ -2,7 +2,7 @@
 utils/messages.py — Template Pesan Bot
 """
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from config import STORE_NAME, STORE_DESCRIPTION
 
@@ -50,10 +50,11 @@ def help_message(is_admin: bool = False) -> str:
         "2️⃣ Pilih kategori game\n"
         "3️⃣ Pilih produk yang mau dibeli\n"
         "4️⃣ Tekan tombol <b>Beli</b>\n"
-        "5️⃣ Transfer sesuai nominal yang tertera\n"
-        "6️⃣ Upload <b>foto bukti transfer</b>\n"
-        "7️⃣ Tunggu konfirmasi admin <i>(biasanya &lt; 5 menit)</i>\n"
-        "8️⃣ Item langsung dikirim ke chat ini ✅\n\n"
+        "5️⃣ Masukkan kode voucher (opsional) 🏷️\n"
+        "6️⃣ Transfer sesuai nominal yang tertera\n"
+        "7️⃣ Upload <b>foto bukti transfer</b>\n"
+        "8️⃣ Tunggu konfirmasi admin <i>(biasanya &lt; 5 menit)</i>\n"
+        "9️⃣ Item langsung dikirim ke chat ini ✅\n\n"
         "<b>Commands Umum:</b>\n"
         "/start — Menu utama\n"
         "/pesananku — Riwayat pesanan kamu\n"
@@ -66,7 +67,9 @@ def help_message(is_admin: bool = False) -> str:
         "/admin — Buka panel admin & statistik\n"
         "/addstock — Tambah stok digital produk\n"
         "/broadcast — Kirim pesan massal ke pembeli\n"
-        "/maintenance on|off — Aktifkan/nonaktifkan mode pemeliharaan\n\n"
+        "/createvoucher — Buat voucher diskon baru\n"
+        "/vouchers — Daftar semua voucher aktif\n"
+        "/maintenance on|off — Mode pemeliharaan\n\n"
     ) if is_admin else ""
 
     footer = "Ada masalah? Hubungi admin."
@@ -104,13 +107,31 @@ def product_detail_message(product) -> str:
     )
 
 
-def payment_info_message(order: dict, product, payment_methods: List[Dict]) -> str:
+def payment_info_message(
+    order: dict,
+    product,
+    payment_methods: List[Dict],
+    voucher_result: Optional[dict] = None,
+) -> str:
+    # Harga yang ditampilkan
+    original = order.get("original_price") or product["price"]
+    final    = order.get("final_price") or product["price"]
+    has_voucher = voucher_result and voucher_result.get("valid")
+
+    price_lines = [f"💰 Total   : <b>Rp {original:,}</b>"]
+    if has_voucher:
+        discount = voucher_result["discount"]
+        price_lines += [
+            f"🏷️ Voucher : <b>- Rp {discount:,}</b> ({order.get('voucher_code','')})",
+            f"💵 Bayar   : <b>Rp {final:,}</b>",
+        ]
+
     lines = [
         "🧾 <b>Detail Pesanan</b>",
         "━━━━━━━━━━━━━━━━━━━",
         f"🔖 Kode    : <code>{order['order_code']}</code>",
         f"🎮 Produk  : <b>{product['name']}</b>",
-        f"💰 Total   : <b>Rp {product['price']:,}</b>",
+        *price_lines,
         "━━━━━━━━━━━━━━━━━━━",
         "",
         "💳 <b>Cara Bayar</b>",
@@ -125,9 +146,10 @@ def payment_info_message(order: dict, product, payment_methods: List[Dict]) -> s
             "",
         ]
 
+    bayar = final if has_voucher else original
     lines += [
         "⚠️ <b>Penting:</b>",
-        f"• Transfer <b>tepat Rp {product['price']:,}</b>",
+        f"• Transfer <b>tepat Rp {bayar:,}</b>",
         "• Jangan tambahkan angka random",
         "• Setelah transfer → tekan tombol di bawah",
         "",
@@ -148,10 +170,17 @@ def proof_received_message(order_code: str) -> str:
 
 
 def order_approved_buyer_message(result: dict, product) -> str:
+    voucher_line = ""
+    if result.get("voucher_code"):
+        voucher_line = f"🏷️ Voucher : <code>{result['voucher_code']}</code>\n"
+
+    final = result.get("final_price") or product["price"]
     return (
         "🎉 <b>Pembayaran Dikonfirmasi!</b>\n\n"
         f"🔖 Kode   : <code>{result['order_code']}</code>\n"
-        f"🎮 Produk : <b>{product['name']}</b>\n\n"
+        f"🎮 Produk : <b>{product['name']}</b>\n"
+        f"{voucher_line}"
+        f"💰 Bayar  : <b>Rp {final:,}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "🔑 <b>Item kamu:</b>\n\n"
         f"<code>{result['item_content']}</code>\n\n"
@@ -196,6 +225,8 @@ def my_orders_message(orders: List) -> str:
 # ── Admin Messages ────────────────────────────────────────────────
 
 def admin_new_order_message(order, product, user) -> str:
+    final = order["final_price"] if order["final_price"] else product["price"]
+    voucher_line = f"🏷️ Voucher  : <code>{order['voucher_code']}</code>\n" if order.get("voucher_code") else ""
     return (
         "🔔 <b>PESANAN BARU!</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
@@ -203,7 +234,8 @@ def admin_new_order_message(order, product, user) -> str:
         f"👤 Buyer   : <b>{user.first_name}</b> (@{user.username or '—'})\n"
         f"🆔 User ID : <code>{user.id}</code>\n"
         f"🎮 Produk  : <b>{product['name']}</b>\n"
-        f"💰 Nominal : <b>Rp {product['price']:,}</b>\n"
+        f"💰 Nominal : <b>Rp {final:,}</b>\n"
+        f"{voucher_line}"
         f"📅 Waktu   : {order['created_at']}\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         "<i>Periksa foto bukti bayar di atas, lalu klik Approve atau Reject.</i>"
@@ -221,7 +253,8 @@ def admin_panel_message(stats: dict) -> str:
         f"   ✅ Total order    : {stats['total_orders']}\n"
         f"   💵 Total revenue  : Rp {stats['total_revenue']:,}\n"
         f"   👥 Total customer : {stats['total_customers']}\n\n"
-        f"⏳ Pending review : <b>{stats['pending_count']}</b>"
+        f"⏳ Pending review : <b>{stats['pending_count']}</b>\n"
+        f"🎫 Voucher aktif  : <b>{stats.get('active_vouchers', 0)}</b>"
     )
 
 
@@ -238,3 +271,22 @@ def admin_report_message(stats: dict) -> str:
         f"• Total customer : {stats['total_customers']}\n\n"
         f"<i>Diperbarui: {datetime.now().strftime('%d/%m/%Y %H:%M')}</i>"
     )
+
+
+def voucher_list_message(vouchers: list) -> str:
+    if not vouchers:
+        return "🎫 <b>Voucher Aktif</b>\n\nTidak ada voucher aktif saat ini."
+
+    lines = ["🎫 <b>Daftar Voucher Aktif</b>\n", "━━━━━━━━━━━━━━━━━━━"]
+    for v in vouchers:
+        tipe = f"{v['discount_value']}%" if v["discount_type"] == "persen" else f"Rp {v['discount_value']:,}"
+        sisa = v["max_uses"] - v["current_uses"]
+        exp  = str(v["expires_at"])[:10] if v["expires_at"] else "∞"
+        lines.append(
+            f"\n🏷️ <code>{v['code']}</code>\n"
+            f"   💸 Diskon : {tipe}\n"
+            f"   👥 Sisa   : {sisa}/{v['max_uses']} pemakai\n"
+            f"   📅 Sampai : {exp}"
+        )
+
+    return "\n".join(lines)

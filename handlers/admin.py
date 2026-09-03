@@ -2,12 +2,15 @@
 handlers/admin.py — Panel Admin
 =================================
 Commands:
-  /admin     — Tampilkan statistik + menu admin
-  /addstock  — Tambah stok item ke produk
-  /broadcast — Kirim pesan ke semua customer
+  /admin        — Tampilkan statistik + menu admin
+  /addstock     — Tambah stok item ke produk
+  /broadcast    — Kirim pesan ke semua customer
+  /createvoucher — Buat voucher diskon baru
+  /vouchers     — Tampilkan semua voucher aktif
 
 Callbacks:
   admin_*           — Navigasi panel admin
+  admin_voucher*    — Kelola voucher
   approve_{id}      — Approve pesanan
   reject_{id}       — Tampilkan pilihan alasan reject
   reject_do_{id}_{n} — Eksekusi reject dengan alasan
@@ -434,7 +437,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Password salah.")
 
 
-# ── Maintenance Mode ──────────────────────────────────────────────
+# ── Maintenance Mode ────────────────────────────────────────────────
 
 @admin_only
 async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -449,8 +452,8 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"🔧 <b>Maintenance Mode</b>\n\n"
             f"Status sekarang: <b>{status}</b>\n\n"
             "Gunakan:\n"
-            "<code>/maintenance on</code>  — Aktifkan (bot balas pesan pemeliharaan)\n"
-            "<code>/maintenance off</code> — Nonaktifkan (bot kembali normal)",
+            "<code>/maintenance on</code>  — Aktifkan\n"
+            "<code>/maintenance off</code> — Nonaktifkan",
             parse_mode="HTML",
         )
         return
@@ -458,7 +461,6 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     mode = args[0].lower() == "on"
     config.MAINTENANCE_MODE = mode
 
-    # Simpan ke .env agar permanen
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
     if os.path.exists(env_path):
         set_key(env_path, "MAINTENANCE_MODE", "true" if mode else "false")
@@ -472,7 +474,137 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
     else:
         await update.message.reply_text(
-            "✅ <b>Maintenance Mode NONAKTIF</b>\n\n"
-            "Bot kembali beroperasi normal!",
+            "✅ <b>Maintenance Mode NONAKTIF</b>\n\nBot kembali beroperasi normal!",
             parse_mode="HTML",
         )
+
+
+# ── Voucher ────────────────────────────────────────────────────────
+
+@admin_only
+async def admin_voucher_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tampilkan menu kelola voucher."""
+    query = update.callback_query
+    await query.answer()
+    action = query.data  # admin_voucher, admin_voucher_list, admin_voucher_deactivate
+
+    if action == "admin_voucher_list" or action == "admin_voucher":
+        vouchers = db.get_active_vouchers()
+        await query.edit_message_text(
+            text=messages.voucher_list_message(vouchers),
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+    elif action == "admin_voucher_create":
+        await query.edit_message_text(
+            "🎫 <b>Buat Voucher Baru</b>\n\n"
+            "Gunakan command berikut di chat:\n\n"
+            "<code>/createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU</code>\n\n"
+            "<b>Contoh:</b>\n"
+            "<code>/createvoucher HEMAT10 persen 10 50 7</code>\n"
+            "  → Diskon 10%, maks 50 pemakai, berlaku 7 hari\n\n"
+            "<code>/createvoucher FLASH5K nominal 5000 10 1</code>\n"
+            "  → Potongan Rp 5.000, maks 10 pemakai, berlaku 1 hari",
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+    elif action == "admin_voucher_deactivate":
+        await query.edit_message_text(
+            "🗑️ <b>Nonaktifkan Voucher</b>\n\n"
+            "Gunakan command:\n"
+            "<code>/delvoucher KODE</code>\n\n"
+            "<i>Contoh: /delvoucher HEMAT10</i>",
+            parse_mode="HTML",
+            reply_markup=keyboards.admin_voucher_menu_keyboard(),
+        )
+
+
+@admin_only
+async def createvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU
+    Tipe: persen | nominal
+    Contoh: /createvoucher HEMAT10 persen 10 50 7
+    """
+    args = context.args or []
+    if len(args) < 5:
+        await update.message.reply_text(
+            "❌ Format salah!\n\n"
+            "Gunakan:\n"
+            "<code>/createvoucher KODE TIPE NILAI MAX_PEMAKAI HARI_BERLAKU</code>\n\n"
+            "<b>Contoh:</b>\n"
+            "<code>/createvoucher HEMAT10 persen 10 50 7</code>\n"
+            "<code>/createvoucher FLASH5K nominal 5000 10 1</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    code, tipe, nilai, max_uses, hari = args[0], args[1].lower(), args[2], args[3], args[4]
+
+    if tipe not in ("persen", "nominal"):
+        await update.message.reply_text("❌ Tipe harus \"persen\" atau \"nominal\".")
+        return
+
+    try:
+        nilai    = int(nilai)
+        max_uses = int(max_uses)
+        hari     = int(hari)
+    except ValueError:
+        await update.message.reply_text("❌ Nilai, max_pemakai, dan hari_berlaku harus berupa angka.")
+        return
+
+    if tipe == "persen" and not (1 <= nilai <= 100):
+        await update.message.reply_text("❌ Diskon persen harus antara 1–100.")
+        return
+
+    result = db.create_voucher(
+        code=code,
+        discount_type=tipe,
+        discount_value=nilai,
+        max_uses=max_uses,
+        days_valid=hari,
+        created_by=update.effective_user.id,
+    )
+
+    if not result:
+        await update.message.reply_text(f"❌ Kode voucher <code>{code.upper()}</code> sudah ada!", parse_mode="HTML")
+        return
+
+    tipe_label = f"{nilai}%" if tipe == "persen" else f"Rp {nilai:,}"
+    await update.message.reply_text(
+        f"✅ <b>Voucher berhasil dibuat!</b>\n\n"
+        f"🎫 Kode   : <code>{result['code']}</code>\n"
+        f"💸 Diskon  : {tipe_label}\n"
+        f"👥 Maks    : {max_uses} pemakai\n"
+        f"📅 Berlaku : s/d {str(result['expires_at'])[:10]}",
+        parse_mode="HTML",
+    )
+
+
+@admin_only
+async def vouchers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/vouchers — Tampilkan semua voucher aktif."""
+    vouchers = db.get_active_vouchers()
+    await update.message.reply_text(
+        text=messages.voucher_list_message(vouchers),
+        parse_mode="HTML",
+        reply_markup=keyboards.admin_voucher_menu_keyboard(),
+    )
+
+
+@admin_only
+async def delvoucher_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/delvoucher KODE — Nonaktifkan voucher."""
+    args = context.args or []
+    if not args:
+        await update.message.reply_text("❌ Gunakan: /delvoucher KODE")
+        return
+
+    code = args[0].upper()
+    db.deactivate_voucher(code)
+    await update.message.reply_text(
+        f"✅ Voucher <code>{code}</code> berhasil dinonaktifkan.",
+        parse_mode="HTML",
+    )

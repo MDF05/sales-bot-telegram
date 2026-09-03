@@ -29,7 +29,7 @@ def categories_keyboard(categories: List) -> InlineKeyboardMarkup:
 def products_keyboard(products: List, category_id: int) -> InlineKeyboardMarkup:
     kb = []
     for p in products:
-        icon = "✅" if p["stock_count"] > 0 else "❌"
+        icon  = "✅" if p["stock_count"] > 0 else "❌"
         label = f"{icon} {p['name']} — Rp {p['price']:,}"
         kb.append([InlineKeyboardButton(label, callback_data=f"prod_{p['id']}")])
     kb.append([InlineKeyboardButton("◀️ Kembali ke Kategori", callback_data="menu_catalog")])
@@ -51,6 +51,15 @@ def product_detail_keyboard(product) -> InlineKeyboardMarkup:
         callback_data=f"cat_{product['category_id']}",
     )])
     return InlineKeyboardMarkup(kb)
+
+
+def voucher_offer_keyboard(product_id: int) -> InlineKeyboardMarkup:
+    """Tombol tawaran voucher sebelum checkout."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🏷️ Ya, saya punya kode voucher!", callback_data=f"apply_voucher_{product_id}")],
+        [InlineKeyboardButton("🛒 Tidak, langsung bayar", callback_data=f"skip_voucher_{product_id}")],
+        [InlineKeyboardButton("◀️ Batal", callback_data="menu_catalog")],
+    ])
 
 
 def upload_proof_keyboard(order_id: int) -> InlineKeyboardMarkup:
@@ -86,17 +95,26 @@ def admin_menu_keyboard(pending_count: int = 0) -> InlineKeyboardMarkup:
         else "📋 Pesanan Pending"
     )
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(pending_label,       callback_data="admin_orders")],
+        [InlineKeyboardButton(pending_label,         callback_data="admin_orders")],
         [
-            InlineKeyboardButton("📦 Kelola Stok", callback_data="admin_stock"),
-            InlineKeyboardButton("📊 Laporan",     callback_data="admin_report"),
+            InlineKeyboardButton("📦 Kelola Stok",   callback_data="admin_stock"),
+            InlineKeyboardButton("📊 Laporan",        callback_data="admin_report"),
         ],
-        [InlineKeyboardButton("📢 Broadcast",      callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🎫 Kelola Voucher",   callback_data="admin_voucher")],
+        [InlineKeyboardButton("📢 Broadcast",         callback_data="admin_broadcast")],
+    ])
+
+
+def admin_voucher_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Buat Voucher Baru",    callback_data="admin_voucher_create")],
+        [InlineKeyboardButton("📋 Daftar Voucher Aktif", callback_data="admin_voucher_list")],
+        [InlineKeyboardButton("🗑️ Nonaktifkan Voucher",  callback_data="admin_voucher_deactivate")],
+        [InlineKeyboardButton("◀️ Panel Admin",           callback_data="admin_menu")],
     ])
 
 
 def admin_order_action_keyboard(order_id: int) -> InlineKeyboardMarkup:
-    """Tombol Approve/Reject yang dikirim ke admin bersamaan dengan bukti bayar."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ Approve", callback_data=f"approve_{order_id}"),
@@ -107,7 +125,6 @@ def admin_order_action_keyboard(order_id: int) -> InlineKeyboardMarkup:
 
 
 def reject_reason_keyboard(order_id: int) -> InlineKeyboardMarkup:
-    """Pilihan alasan penolakan (numerik untuk menghindari masalah underscore)."""
     reasons = [
         ("Bukti bayar tidak valid", 1),
         ("Nominal tidak sesuai",    2),
@@ -124,7 +141,6 @@ def reject_reason_keyboard(order_id: int) -> InlineKeyboardMarkup:
 
 
 def pending_orders_keyboard(orders: List) -> InlineKeyboardMarkup:
-    """Daftar pesanan pending dengan tombol Approve/Reject inline."""
     kb = []
     for o in orders:
         kb.append([

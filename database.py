@@ -1,7 +1,7 @@
 """
 database.py — SQLite Database Manager
 =======================================
-Semua operasi CRUD untuk produk, stok, pesanan, dan customer.
+Semua operasi CRUD untuk produk, stok, pesanan, customer, dan voucher.
 """
 import sqlite3
 import json
@@ -9,7 +9,7 @@ import os
 import logging
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 
 from config import DB_PATH, PRODUCTS_JSON
@@ -50,6 +50,7 @@ def init_db():
                 name        TEXT    NOT NULL,
                 emoji       TEXT    DEFAULT '📦',
                 slug        TEXT    UNIQUE,
+                banner_file_id TEXT DEFAULT '',
                 is_active   INTEGER DEFAULT 1,
                 sort_order  INTEGER DEFAULT 0
             );
@@ -75,12 +76,38 @@ def init_db():
                 sold_at     TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS vouchers (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                code            TEXT    UNIQUE NOT NULL,
+                discount_type   TEXT    NOT NULL CHECK(discount_type IN ('persen','nominal')),
+                discount_value  INTEGER NOT NULL,
+                max_uses        INTEGER DEFAULT 1,
+                current_uses    INTEGER DEFAULT 0,
+                expires_at      TEXT,
+                is_active       INTEGER DEFAULT 1,
+                created_by      INTEGER,
+                created_at      TEXT    DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS voucher_usages (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                voucher_id  INTEGER REFERENCES vouchers(id),
+                user_id     INTEGER REFERENCES customers(user_id),
+                order_id    INTEGER,
+                used_at     TEXT    DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(voucher_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS orders (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_code      TEXT    UNIQUE,
                 user_id         INTEGER REFERENCES customers(user_id),
                 product_id      INTEGER REFERENCES products(id),
                 stock_id        INTEGER REFERENCES stock(id),
+                voucher_id      INTEGER REFERENCES vouchers(id),
+                voucher_code    TEXT    DEFAULT '',
+                original_price  INTEGER DEFAULT 0,
+                final_price     INTEGER DEFAULT 0,
                 status          TEXT    DEFAULT 'waiting_payment',
                 proof_file_id   TEXT,
                 reject_reason   TEXT    DEFAULT '',
@@ -89,6 +116,22 @@ def init_db():
                 updated_at      TEXT    DEFAULT (datetime('now', 'localtime'))
             );
         """)
+
+        # Migrasi kolom baru jika tabel orders sudah ada tapi belum punya kolom baru
+        existing_cols = [row[1] for row in conn.execute("PRAGMA table_info(orders)").fetchall()]
+        for col, coltype in [
+            ("voucher_id",     "INTEGER"),
+            ("voucher_code",   "TEXT DEFAULT ''"),
+            ("original_price", "INTEGER DEFAULT 0"),
+            ("final_price",    "INTEGER DEFAULT 0"),
+        ]:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {coltype}")
+
+        # Migrasi kolom banner_file_id ke categories
+        cat_cols = [row[1] for row in conn.execute("PRAGMA table_info(categories)").fetchall()]
+        if "banner_file_id" not in cat_cols:
+            conn.execute("ALTER TABLE categories ADD COLUMN banner_file_id TEXT DEFAULT ''")
 
     _load_initial_products()
     logger.info("✅ Database initialized: %s", DB_PATH)
@@ -171,6 +214,15 @@ def get_category(category_id: int) -> Optional[sqlite3.Row]:
         ).fetchone()
 
 
+def set_category_banner(category_id: int, file_id: str):
+    """Simpan file_id banner Telegram untuk kategori."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE categories SET banner_file_id = ? WHERE id = ?",
+            (file_id, category_id),
+        )
+
+
 # ── Product ───────────────────────────────────────────────────────
 
 def get_products_by_category(category_id: int) -> List[sqlite3.Row]:
@@ -228,6 +280,112 @@ def get_all_stock(product_id: int) -> List[sqlite3.Row]:
         ).fetchall()
 
 
+# ── Voucher ───────────────────────────────────────────────────────
+
+def create_voucher(
+    code: str,
+    discount_type: str,
+    discount_value: int,
+    max_uses: int,
+    days_valid: int,
+    created_by: int,
+) -> Optional[Dict]:
+    """Buat voucher baru. Return dict atau None jika kode sudah ada."""
+    expires_at = (datetime.now() + timedelta(days=days_valid)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO vouchers
+                   (code, discount_type, discount_value, max_uses, expires_at, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (code.upper(), discount_type, discount_value, max_uses, expires_at, created_by),
+            )
+            return {
+                "id":             cur.lastrowid,
+                "code":           code.upper(),
+                "discount_type":  discount_type,
+                "discount_value": discount_value,
+                "max_uses":       max_uses,
+                "expires_at":     expires_at,
+            }
+    except sqlite3.IntegrityError:
+        return None  # Kode sudah ada
+
+
+def validate_voucher(code: str, user_id: int, product_price: int) -> Dict:
+    """
+    Validasi kode voucher untuk user dan produk tertentu.
+    Return: {
+        "valid": bool,
+        "error": str | None,
+        "voucher": Row | None,
+        "discount": int,
+        "final_price": int,
+    }
+    """
+    with get_conn() as conn:
+        v = conn.execute(
+            "SELECT * FROM vouchers WHERE code = ? AND is_active = 1",
+            (code.upper(),)
+        ).fetchone()
+
+        if not v:
+            return {"valid": False, "error": "❌ Kode voucher tidak ditemukan.", "voucher": None, "discount": 0, "final_price": product_price}
+
+        # Cek expiry
+        if v["expires_at"] and datetime.now() > datetime.strptime(v["expires_at"], "%Y-%m-%d %H:%M:%S"):
+            return {"valid": False, "error": "❌ Voucher sudah kedaluwarsa.", "voucher": None, "discount": 0, "final_price": product_price}
+
+        # Cek kuota
+        if v["current_uses"] >= v["max_uses"]:
+            return {"valid": False, "error": "❌ Kuota voucher sudah habis.", "voucher": None, "discount": 0, "final_price": product_price}
+
+        # Cek sudah pernah dipakai user ini
+        used = conn.execute(
+            "SELECT id FROM voucher_usages WHERE voucher_id = ? AND user_id = ?",
+            (v["id"], user_id)
+        ).fetchone()
+        if used:
+            return {"valid": False, "error": "❌ Kamu sudah pernah menggunakan voucher ini.", "voucher": None, "discount": 0, "final_price": product_price}
+
+        # Hitung diskon
+        if v["discount_type"] == "persen":
+            discount = int(product_price * v["discount_value"] / 100)
+        else:
+            discount = v["discount_value"]
+
+        final_price = max(0, product_price - discount)
+
+        return {
+            "valid":       True,
+            "error":       None,
+            "voucher":     v,
+            "discount":    discount,
+            "final_price": final_price,
+        }
+
+
+def get_active_vouchers() -> List[sqlite3.Row]:
+    """Ambil semua voucher aktif yang belum expired."""
+    with get_conn() as conn:
+        return conn.execute("""
+            SELECT * FROM vouchers
+            WHERE is_active = 1
+              AND (expires_at IS NULL OR expires_at > datetime('now', 'localtime'))
+            ORDER BY created_at DESC
+        """).fetchall()
+
+
+def deactivate_voucher(code: str) -> bool:
+    """Nonaktifkan voucher berdasarkan kode."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE vouchers SET is_active = 0 WHERE code = ?",
+            (code.upper(),)
+        )
+        return True
+
+
 # ── Order ─────────────────────────────────────────────────────────
 
 def _make_order_code() -> str:
@@ -248,13 +406,18 @@ def get_user_pending_order(user_id: int) -> Optional[sqlite3.Row]:
         """, (user_id,)).fetchone()
 
 
-def create_order(user_id: int, product_id: int) -> Optional[Dict]:
+def create_order(
+    user_id: int,
+    product_id: int,
+    voucher_id: Optional[int] = None,
+    voucher_code: str = "",
+    original_price: int = 0,
+    final_price: int = 0,
+) -> Optional[Dict]:
     """
     Buat pesanan baru. Return dict order atau None jika stok habis.
-    Hanya buat satu order per user (cegah duplikat).
     """
     with get_conn() as conn:
-        # Cek stok tersedia
         stok = conn.execute(
             "SELECT id FROM stock WHERE product_id = ? AND is_sold = 0 LIMIT 1",
             (product_id,),
@@ -264,22 +427,50 @@ def create_order(user_id: int, product_id: int) -> Optional[Dict]:
 
         order_code = _make_order_code()
         cur = conn.execute("""
-            INSERT INTO orders (order_code, user_id, product_id, status)
-            VALUES (?, ?, ?, 'waiting_payment')
-        """, (order_code, user_id, product_id))
+            INSERT INTO orders
+              (order_code, user_id, product_id, status,
+               voucher_id, voucher_code, original_price, final_price)
+            VALUES (?, ?, ?, 'waiting_payment', ?, ?, ?, ?)
+        """, (order_code, user_id, product_id,
+               voucher_id, voucher_code, original_price, final_price))
+
+        # Tandai voucher terpakai
+        if voucher_id:
+            conn.execute(
+                "UPDATE vouchers SET current_uses = current_uses + 1 WHERE id = ?",
+                (voucher_id,)
+            )
+            conn.execute(
+                "INSERT INTO voucher_usages (voucher_id, user_id, order_id) VALUES (?, ?, ?)",
+                (voucher_id, user_id, cur.lastrowid)
+            )
 
         return {
-            "id":         cur.lastrowid,
-            "order_code": order_code,
-            "user_id":    user_id,
-            "product_id": product_id,
-            "status":     "waiting_payment",
+            "id":            cur.lastrowid,
+            "order_code":    order_code,
+            "user_id":       user_id,
+            "product_id":    product_id,
+            "voucher_code":  voucher_code,
+            "original_price": original_price,
+            "final_price":   final_price,
+            "status":        "waiting_payment",
         }
 
 
 def cancel_order(order_id: int) -> bool:
     """Batalkan pesanan (status → cancelled)."""
     with get_conn() as conn:
+        # Kembalikan kuota voucher jika ada
+        order = conn.execute("SELECT voucher_id, user_id FROM orders WHERE id = ?", (order_id,)).fetchone()
+        if order and order["voucher_id"]:
+            conn.execute(
+                "UPDATE vouchers SET current_uses = MAX(0, current_uses - 1) WHERE id = ?",
+                (order["voucher_id"],)
+            )
+            conn.execute(
+                "DELETE FROM voucher_usages WHERE voucher_id = ? AND user_id = ?",
+                (order["voucher_id"], order["user_id"])
+            )
         conn.execute("""
             UPDATE orders SET status = 'cancelled',
                               updated_at = datetime('now', 'localtime')
@@ -318,14 +509,12 @@ def approve_order(order_id: int, admin_id: int) -> Optional[Dict]:
         if not stok:
             return {"error": "out_of_stock"}
 
-        # Tandai stok sebagai terjual
         conn.execute("""
             UPDATE stock SET is_sold = 1, order_id = ?,
                              sold_at = datetime('now', 'localtime')
             WHERE id = ?
         """, (order_id, stok["id"]))
 
-        # Update order
         conn.execute("""
             UPDATE orders
             SET status = 'delivered', stock_id = ?, admin_id = ?,
@@ -338,6 +527,8 @@ def approve_order(order_id: int, admin_id: int) -> Optional[Dict]:
             "order_code":   order["order_code"],
             "user_id":      order["user_id"],
             "product_id":   order["product_id"],
+            "voucher_code": order["voucher_code"],
+            "final_price":  order["final_price"],
             "item_content": stok["content"],
         }
 
@@ -415,12 +606,13 @@ def get_sales_stats() -> Dict:
         return {
             "total_orders":    q("SELECT COUNT(*) FROM orders WHERE status='delivered'"),
             "today_orders":    q("SELECT COUNT(*) FROM orders WHERE status='delivered' AND DATE(created_at)=?", today),
-            "today_revenue":   q("""SELECT COALESCE(SUM(p.price),0) FROM orders o
-                                    LEFT JOIN products p ON o.product_id=p.id
+            "today_revenue":   q("""SELECT COALESCE(SUM(CASE WHEN o.final_price > 0 THEN o.final_price ELSE p.price END),0)
+                                    FROM orders o LEFT JOIN products p ON o.product_id=p.id
                                     WHERE o.status='delivered' AND DATE(o.created_at)=?""", today),
-            "total_revenue":   q("""SELECT COALESCE(SUM(p.price),0) FROM orders o
-                                    LEFT JOIN products p ON o.product_id=p.id
+            "total_revenue":   q("""SELECT COALESCE(SUM(CASE WHEN o.final_price > 0 THEN o.final_price ELSE p.price END),0)
+                                    FROM orders o LEFT JOIN products p ON o.product_id=p.id
                                     WHERE o.status='delivered'"""),
             "pending_count":   q("SELECT COUNT(*) FROM orders WHERE status='pending_review'"),
             "total_customers": q("SELECT COUNT(*) FROM customers"),
+            "active_vouchers": q("SELECT COUNT(*) FROM vouchers WHERE is_active=1 AND (expires_at IS NULL OR expires_at > datetime('now','localtime'))"),
         }
