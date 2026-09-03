@@ -6,9 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/sales_bot
-ExecStart=/home/ubuntu/sales_bot/venv/bin/python main.py
+User=dava
+WorkingDirectory=/home/dava/sales-bot-telegram
+ExecStart=/home/dava/sales-bot-telegram/venv/bin/python main.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

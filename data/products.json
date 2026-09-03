@@ -1,9 +1,29 @@
 {
   "categories": [
-    {"id": 1, "name": "Roblox", "emoji": "🟥", "slug": "roblox", "sort_order": 1}
+    {
+      "id": 1,
+      "name": "Roblox",
+      "emoji": "🟥",
+      "slug": "roblox",
+      "sort_order": 1
+    }
   ],
   "products": [
-    {"id":  1, "category_id": 1, "name": "840 Robux", "description": "Voucher Digital 840 Robux", "price":  150000, "sort_order": 1},
-    {"id":  2, "category_id": 1, "name": "1050 Robux", "description": "Voucher Digital 1050 Robux", "price": 185000, "sort_order": 2}
+    {
+      "id": 1,
+      "category_id": 1,
+      "name": "840 Robux",
+      "description": "Voucher Digital 840 Robux",
+      "price": 70000,
+      "sort_order": 1
+    },
+    {
+      "id": 2,
+      "category_id": 1,
+      "name": "1050 Robux",
+      "description": "Voucher Digital 1050 Robux",
+      "price": 85000,
+      "sort_order": 2
+    }
   ]
 }
