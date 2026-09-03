@@ -84,7 +84,7 @@ def category_message(cat_name: str) -> str:
     return (
         f"<b>{cat_name}</b>\n\n"
         "Pilih produk:\n"
-        "<i>✅ = stok tersedia &nbsp;|&nbsp; ❌ = habis</i>"
+        "<i>✅ = stok tersedia  |  ❌ = habis</i>"
     )
 
 
@@ -176,12 +176,13 @@ def order_approved_buyer_message(result: dict, product) -> str:
 
     final = result["final_price"] or product["price"]
 
-    # Strip prefix sebelum "-" pertama (misal "Roblox-FZQ3W..." -> "FZQ3W...")
+    # Strip prefix jika ada (misal "Roblox-FZQ3W..." -> "FZQ3W...")
     raw_code = result["item_content"]
     if "-" in raw_code:
         first_part = raw_code.split("-")[0]
-        # Hapus prefix jika bukan angka (angka = bagian kode asli)
-        if not first_part.isdigit():
+        # Hanya hapus prefix jika dia huruf semua (misal "Roblox", "MLBB") 
+        # Kode voucher asli (FZQ3W) pasti mengandung angka & huruf (alphanumeric)
+        if first_part.isalpha() or first_part.lower() in ["roblox", "mlbb", "ff", "pubg"]:
             raw_code = raw_code[len(first_part) + 1:]
 
     return (
