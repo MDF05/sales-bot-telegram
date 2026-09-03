@@ -59,7 +59,6 @@ def help_message(is_admin: bool = False) -> str:
         "/start — Menu utama\n"
         "/pesananku — Riwayat pesanan kamu\n"
         "/help — Tampilkan bantuan ini\n"
-        "/login — Login sebagai admin (opsional)\n\n"
     )
 
     admin_cmds = (
